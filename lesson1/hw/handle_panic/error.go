@@ -6,12 +6,12 @@ import (
 )
 
 type CustomError struct {
-	timestamp time.Time
+	raiseTime time.Time
 	message   string
 }
 
 func (e CustomError) Error() string {
-	formatTS := e.timestamp.Format(time.RFC3339)
+	formatTS := e.raiseTime.Format(time.RFC3339)
 	msg := fmt.Sprintf("%s ERROR: %s", formatTS, e.message)
 	return msg
 }

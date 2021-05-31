@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"runtime"
+	"runtime/debug"
 )
 
 var testData = [][]int{
@@ -11,12 +11,6 @@ var testData = [][]int{
 	{}, // expected panic
 	{1},
 	{0},
-}
-
-func getStackTrace() string {
-	trace := make([]byte, 1024)
-	runtime.Stack(trace, false)
-	return string(trace)
 }
 
 // Test function which can panic
@@ -33,7 +27,7 @@ func CalcAvg(sequence []int) (avg int, err error) {
 	defer func() {
 		panicValue := recover()
 		if panicValue != nil {
-			fmt.Printf("PANIC: %v\n%s", panicValue, getStackTrace())
+			fmt.Printf("PANIC: %v\n%s", panicValue, debug.Stack())
 			err = NewError(fmt.Sprintf("%v", panicValue))
 		}
 	}()

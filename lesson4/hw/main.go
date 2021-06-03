@@ -14,7 +14,8 @@ const stopTimeout = 1 * time.Second
 func main() {
 	log.Printf("Started pid=%d\n", os.Getpid())
 	// setup signal handler
-	ctx, _ := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	defer cancel()
 
 	workUntilTerm(ctx, superWork10Sec)
 
@@ -35,7 +36,8 @@ func workUntilTerm(ctx context.Context, task func()) {
 			log.Println("break on signal!")
 			// after cancel signal
 			// wait {stopTimeout} to work done or exit
-			timeout, _ := context.WithTimeout(context.Background(), stopTimeout)
+			timeout, tCancel := context.WithTimeout(context.Background(), stopTimeout)
+			defer tCancel()
 			select {
 			case <-timeout.Done():
 				log.Println("timeout expires")

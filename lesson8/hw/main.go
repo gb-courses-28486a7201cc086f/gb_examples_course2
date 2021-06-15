@@ -17,49 +17,92 @@ import (
 	"flag"
 	"fmt"
 	"os"
-
-	"geekbrains/examples/lesson8/hw/workerpool"
 )
 
 // Config contains tool parameters, provided by user
 type Config struct {
-	searchPath         string
-	deleteDuplicates   bool
-	notConfirmDeletion bool
-	workers            int
+	searchPath                string
+	deleteDuplicates          bool
+	disableDeleteConfirmation bool
+	workers                   int
 }
 
 // RunningConfig is common config object
 // populated during initial setup
 var RunningConfig Config
 
+// setUp makes input flags parsing and validation.
+// parametes stored in global config object
 func setUp() error {
 	flag.StringVar(&RunningConfig.searchPath, "p", ".", "path to start directory, if not exits tool return error")
 	flag.BoolVar(&RunningConfig.deleteDuplicates, "remove", false, "optionally: remove second (and other) copy of file")
-	flag.BoolVar(&RunningConfig.notConfirmDeletion, "y", false, "if 'd' flag provided, deletes files without confirmation")
+	flag.BoolVar(&RunningConfig.disableDeleteConfirmation, "y", false, "if 'd' flag provided, deletes files without confirmation")
 	flag.IntVar(&RunningConfig.workers, "w", 1, "parallel workers to run")
 	flag.Parse()
 
 	if RunningConfig.workers < 1 {
-		return errors.New("count of workers should be greater or equal 1")
+		return errors.New("-w: count of workers should be greater or equal 1")
 	}
 
 	return nil
 }
 
+func exitOnErr(err error) {
+	msg := fmt.Sprintf("ERROR: %s\n", err.Error())
+	os.Stderr.WriteString(msg)
+	os.Exit(1)
+}
+
+func report(duplicates []DuplicatesDescr) {
+	for _, group := range duplicates {
+		fmt.Printf("File %s, size %d has duplications:\n", group.Origin, group.Size)
+		for _, item := range group.Duplicates {
+			fmt.Printf("\t%s\n", item)
+		}
+	}
+	fmt.Println("")
+}
+
+func confirmDeleteDuplicates() bool {
+	if !RunningConfig.deleteDuplicates {
+		return false
+	}
+	if RunningConfig.disableDeleteConfirmation {
+		fmt.Println("Remove duplicates confirmed")
+		return true
+	}
+
+	var deleteConfirmation string
+	fmt.Println("Remove all duplicates (cannot be undone)? type 'yes' to confirm")
+	fmt.Scanln(&deleteConfirmation)
+	if deleteConfirmation != "yes" {
+		fmt.Println("Remove did not confirmed")
+		return false
+	}
+	return true
+}
+
 func main() {
 	if err := setUp(); err != nil {
-		fmt.Printf("invalid parameters: %s\nexit", err.Error())
-		os.Exit(1)
+		exitOnErr(err)
 	}
 
-	pool, err := workerpool.NewPool(RunningConfig.workers)
+	files, err := ScanDir(RunningConfig.searchPath)
 	if err != nil {
-		msg := fmt.Sprintf("unexpected error: %e", err)
-		os.Stderr.WriteString(msg)
-		os.Exit(1)
+		exitOnErr(err)
 	}
 
-	// cleanup
-	pool.Join()
+	duplicates := CheckDuplicates(files)
+	if len(duplicates) > 0 {
+		report(duplicates)
+
+		if confirmDeleteDuplicates() {
+			err = DeleteDuplicates(duplicates)
+			if err != nil {
+				exitOnErr(err)
+			}
+		}
+	}
+
+	fmt.Println("Done")
 }

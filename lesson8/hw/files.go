@@ -3,90 +3,89 @@ package main
 import (
 	"io/fs"
 	"io/ioutil"
-	"path"
+	"os"
 	"path/filepath"
-
-	"geekbrains/examples/lesson8/hw/workerpool"
 )
 
+// FileDescr contains some file attributes
+// used to check if it is unique
 type FileDescr struct {
 	Name string
 	Size int64
 }
 
+// ScanDir recursively scan directories and returns list of files
 func ScanDir(startDir string) (files map[string]FileDescr, err error) {
+	if _, err := ioutil.ReadDir(startDir); err != nil {
+		return files, err
+	}
+
 	files = make(map[string]FileDescr)
-	err = filepath.Walk(startDir, func(currDir string, currFile fs.FileInfo, err error) error {
+	err = filepath.Walk(startDir, func(currPath string, currFile fs.FileInfo, err error) error {
 		if currFile.Mode().IsRegular() {
-			key := path.Join(currDir, currFile.Name())
-			files[key] = FileDescr{currFile.Name(), currFile.Size()}
+			files[currPath] = FileDescr{currFile.Name(), currFile.Size()}
 		}
 		return nil
 	})
 	return
 }
 
-type IndexDirJob struct {
-	dirname   string
-	childDirs []string
-	files     map[string]FileDescr
-	err       error
+// DuplicatesDescr contains description
+// of origin file and list of it's copies
+type DuplicatesDescr struct {
+	Origin     string
+	Size       int64
+	Duplicates []string
 }
 
-func (idj *IndexDirJob) Run() {
-	files, err := ioutil.ReadDir(idj.dirname)
-	if err != nil {
-		idj.err = err
-		return
-	}
-	for _, file := range files {
-		key := path.Join(idj.dirname, file.Name())
-		if file.Mode().IsRegular() {
-			idj.files[key] = FileDescr{file.Name(), file.Size()}
-		} else if file.IsDir() {
-			idj.childDirs = append(idj.childDirs, key)
-		}
-	}
+// duplicateKey is unique key of file
+type duplicateKey struct {
+	name string
+	size int64
 }
 
-func ScanDirParallel(startDir string, workers int) (files map[string]FileDescr, err error) {
-	files = make(map[string]FileDescr)
-	pool, err := workerpool.NewPool(workers)
-	if err != nil {
-		return files, err
+// groupFiles groups files by unique key into map,
+// where key is unique key of file and value is list of the file paths
+func groupFiles(files map[string]FileDescr) map[duplicateKey][]string {
+	groupFiles := make(map[duplicateKey][]string)
+	for filePath, fileDescr := range files {
+		key := duplicateKey{fileDescr.Name, fileDescr.Size}
+		_, exists := groupFiles[key]
+		if !exists {
+			groupFiles[key] = []string{filePath}
+		} else {
+			// if already exists - add new name to list of copies
+			groupFiles[key] = append(groupFiles[key], filePath)
+		}
 	}
+	return groupFiles
+}
 
-	// start from one dir and go 'deeper' to files tree
-	// until exists child directories.
-	// each iteration is one level of files hierarhy
-	childDirs := []string{startDir}
-	for len(childDirs) > 0 {
-		// create index jobs
-		jobs := make([]workerpool.Job, 0, len(childDirs))
-		for _, dir := range childDirs {
-			jobs = append(jobs, &IndexDirJob{
-				dirname:   dir,
-				childDirs: make([]string, 0),
-				files:     make(map[string]FileDescr),
-			})
-		}
-		// run jobs in concurrent mode
-		err := pool.RunBatch(jobs...)
-		if err != nil {
-			return files, err
-		}
-		// parse results
-		childDirs = []string{}
-		for _, j := range jobs {
-			job := j.(*IndexDirJob)
-			if job.err != nil {
-				return files, job.err
+// CheckDuplicates search for files which has more than one copy
+func CheckDuplicates(files map[string]FileDescr) (duplicates []DuplicatesDescr) {
+	for key, group := range groupFiles(files) {
+		if len(group) > 1 {
+			// files has more than 1 copy
+			descr := DuplicatesDescr{
+				Origin:     group[0],
+				Size:       key.size,
+				Duplicates: group[1:],
 			}
-			childDirs = append(childDirs, job.childDirs...)
-			for key, val := range job.files {
-				files[key] = val
+			duplicates = append(duplicates, descr)
+		}
+	}
+	return duplicates
+}
+
+// DeleteDuplicates removes all extra copies of files
+func DeleteDuplicates(duplicates []DuplicatesDescr) error {
+	for _, group := range duplicates {
+		for _, filename := range group.Duplicates {
+			err := os.Remove(filename)
+			if err != nil {
+				return err
 			}
 		}
 	}
-	return
+	return nil
 }
